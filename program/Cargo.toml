@@ -1,0 +1,12 @@
+[package]
+name = "sp1_project_program"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sp1-zkvm = { git = "https://github.com/succinctlabs/sp1.git", rev = "v1.0.0-testnet"}
+serde = { version = "1.0.202"}
+serde_json = "1.0.117"
+mail-auth = { version = "0.4.0" }
+tokio = { version = "1.37.0", features = ["full"]}
+dkim = { version = "0.1.1"}

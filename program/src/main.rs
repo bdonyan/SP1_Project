@@ -1,62 +1,66 @@
-use mail_auth::{AuthenticatedMessage, DkimResult, Resolver};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
+use std::error::Error;
+use mail_auth::{AuthenticatedMessage, DkimResult, Resolver};
+use serde::Deserialize;
+use mailparse::{parse_mail, MailHeaderMap};
+use tokio::runtime::Runtime;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct DkimData {
-    dkim_signature: String,
-    signed_headers: HashMap<String, String>,
-    body: String,
     original_email: String,
+    selector: String,
+    domain: String,
+    decoded_body: String,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Read DKIM data from JSON file
-    let file = File::open("../data/dkim_data.json")?;
-    let reader = BufReader::new(file);
-    let dkim_data: DkimData = serde_json::from_reader(reader)?;
+fn verify_dkim(dkim_data: DkimData) -> Result<(), Box<dyn Error>> {
+    // Parse the email using mailparse
+    let parsed = parse_mail(dkim_data.original_email.as_bytes())?;
+    println!("Parsed Email Headers: {:?}", parsed.headers);
 
-    // Verify the DKIM signature using the original email content
-    match verify_dkim(&dkim_data).await {
-        Ok(true) => println!("DKIM signature is valid!"),
-        Ok(false) => println!("DKIM signature is invalid!"),
-        Err(e) => println!("Verification failed: {}", e),
+    // Extract the subject and body
+    let subject = parsed.headers.get_first_value("Subject").unwrap_or_else(|| "No Subject".to_string());
+    let body = dkim_data.decoded_body;
+
+    println!("Subject: {:?}", subject);
+    println!("Body: {:?}", body);
+
+    // Create a resolver
+    let resolver = Resolver::new_google().unwrap();
+
+    // Parse the authenticated message
+    let authenticated_message = AuthenticatedMessage::parse(dkim_data.original_email.as_bytes()).unwrap();
+
+    // Validate the DKIM signature synchronously
+    let runtime = Runtime::new().unwrap();
+    let result = runtime.block_on(resolver.verify_dkim(&authenticated_message));
+
+    // Check if all signatures passed verification
+    if result.iter().all(|s| s.result() == &DkimResult::Pass) {
+        println!("DKIM signature is valid.");
+    } else {
+        println!("DKIM signature verification failed.");
     }
 
     Ok(())
 }
 
-async fn verify_dkim(dkim_data: &DkimData) -> Result<bool, Box<dyn std::error::Error>> {
-    // Create a resolver using Google's DNS
-    let resolver = Resolver::new_google().map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+fn main() -> Result<(), Box<dyn Error>> {
+    let file = File::open("../data/dkim_data.json")?;
+    let reader = BufReader::new(file);
+    let dkim_data: DkimData = serde_json::from_reader(reader)?;
 
-    // Use the original email content directly
-    let email_message = dkim_data.original_email.as_bytes();
+    // Print the email content to debug
+    println!("Original Email Content:\n{}", dkim_data.original_email);
+    println!("Decoded Body Content:\n{}", dkim_data.decoded_body);
 
-    // Debug: Print the email content
-    // println!("Email Content:\n{}", String::from_utf8_lossy(email_message));
+    // Print the selector and domain to debug
+    println!("Selector: {:?}", dkim_data.selector);
+    println!("Domain: {:?}", dkim_data.domain);
 
-    // Parse the authenticated message
-    let authenticated_message = AuthenticatedMessage::parse(email_message)
-        .ok_or("Failed to parse authenticated message")?;
+    // Verify DKIM
+    verify_dkim(dkim_data)?;
 
-    // Debug: Print the authenticated message
-    // println!("Authenticated Message:\n{:?}", authenticated_message);
-
-    // Validate the DKIM signature asynchronously
-    let result = resolver.verify_dkim(&authenticated_message).await;
-
-    // Debug: Print the verification result
-    // println!("Verification Result:\n{:?}", result);
-
-    // Check if all signatures passed verification
-    let all_signatures_passed = result.iter().all(|s| s.result() == &DkimResult::Pass);
-
-    sp1_zkvm::io::commit(&all_signatures_passed);
-
-    // Return the result
-    Ok(all_signatures_passed)
+    Ok(())
 }

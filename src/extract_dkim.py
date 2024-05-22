@@ -1,50 +1,52 @@
+import os
 import json
-import email
-from email import policy
-from email.parser import BytesParser
-import sys
+import quopri
+from email import message_from_string
 
-def extract_dkim_signature(email_content):
-    msg = BytesParser(policy=policy.default).parsebytes(email_content)
-    dkim_signature = msg['DKIM-Signature']
-    if dkim_signature:
-        return dkim_signature, msg
+def decode_quoted_printable(text):
+    return quopri.decodestring(text).decode('utf-8', errors='ignore')
+
+def extract_dkim_info(raw_email):
+    msg = message_from_string(raw_email)
+    
+    dkim_header = msg['DKIM-Signature']
+    if dkim_header:
+        parts = dkim_header.split(';')
+        dkim_selector = next((part.split('=')[1].strip() for part in parts if part.strip().startswith('s=')), None)
+        dkim_domain = next((part.split('=')[1].strip() for part in parts if part.strip().startswith('d=')), None)
     else:
-        raise ValueError("No DKIM-Signature found in the email headers.")
+        raise ValueError("No DKIM-Signature header found in the email")
 
-def email_message_to_dict(msg):
-    msg_dict = {}
-    for header, value in msg.items():
-        msg_dict[header] = value
-    return msg_dict
-
-def extract_body(msg):
+    decoded_body = ""
     if msg.is_multipart():
-        for part in msg.iter_parts():
-            if part.get_content_type() == 'text/plain':
-                charset = part.get_content_charset() or 'utf-8'
-                return part.get_payload(decode=True).decode(charset)
+        for part in msg.get_payload():
+            if part.get_content_type() == "text/plain":
+                decoded_body = decode_quoted_printable(part.get_payload())
+                break
     else:
-        charset = msg.get_content_charset() or 'utf-8'
-        return msg.get_payload(decode=True).decode(charset)
-
-def main():
-    # Read the email content from a file or standard input
-    email_content = sys.stdin.read().encode('utf-8')
-
-    dkim_signature, msg = extract_dkim_signature(email_content)
-    signed_headers = email_message_to_dict(msg)
-    body = extract_body(msg)
-
-    data = {
-        "dkim_signature": dkim_signature,
-        "signed_headers": signed_headers,
-        "body": body,
-        "original_email": email_content.decode('utf-8')
+        decoded_body = decode_quoted_printable(msg.get_payload())
+    
+    return {
+        "original_email": raw_email,
+        "selector": dkim_selector,
+        "domain": dkim_domain,
+        "dkim_signature": dkim_header,
+        "decoded_body": decoded_body
     }
 
-    with open("dkim_data.json", "w", encoding='utf-8') as outfile:
-        json.dump(data, outfile, indent=4, ensure_ascii=False)
+def main():
+    email_file_path = os.path.join(os.path.dirname(__file__), '../data/email.eml')
+    output_json_path = os.path.join(os.path.dirname(__file__), '../data/dkim_data.json')
+
+    with open(email_file_path, 'r', encoding='utf-8') as file:
+        raw_email = file.read()
+
+    dkim_info = extract_dkim_info(raw_email)
+
+    with open(output_json_path, 'w', encoding='utf-8') as json_file:
+        json.dump(dkim_info, json_file, indent=4)
+
+    print(dkim_info)
 
 if __name__ == "__main__":
     main()

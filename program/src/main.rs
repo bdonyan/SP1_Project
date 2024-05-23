@@ -1,14 +1,17 @@
+#![no_main]
+sp1_zkvm::entrypoint!(main);
+
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::error::Error;
 use std::collections::HashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Sha256, Digest};
-use base32;
-use base64; 
+use base64;
 use mailparse::{parse_mail, MailHeaderMap};
+use sp1_sdk::{utils, ProverClient, SP1Stdin};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct DkimData {
     original_email: String,
     selector: String,
@@ -83,7 +86,7 @@ fn verify_dkim(dkim_data: DkimData) -> Result<(), Box<dyn Error>> {
     let parsed = parse_mail(dkim_data.original_email.as_bytes())?;
     println!("Parsed Email Headers: {:?}", parsed.headers);
 
-    let subject = parsed.headers.get_first_value("Subject").unwrap_or_else(|_| Some("No Subject".to_string()));
+    let subject = parsed.headers.get_first_value("Subject").unwrap_or_else(|| Some("No Subject".to_string()));
     let body = dkim_data.decoded_body;
 
     println!("Subject: {:?}", subject);
@@ -97,7 +100,7 @@ fn verify_dkim(dkim_data: DkimData) -> Result<(), Box<dyn Error>> {
 
     println!("DKIM signature valid: {}", is_valid);
 
-    // sp1_zkvm::io::commit(&is_valid.to_string());
+    sp1_zkvm::io::commit(&is_valid.to_string());
 
     Ok(())
 }

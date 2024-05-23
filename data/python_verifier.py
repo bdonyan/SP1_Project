@@ -1,16 +1,13 @@
-# test: correct verifier
-
 import dkim
 import email
 from email import policy
 from email.parser import BytesParser
+import hashlib
+import base64
 
 def verify_dkim_signature(email_content):
     # Parse the email content
     msg = BytesParser(policy=policy.default).parsebytes(email_content)
-
-    # Extract the headers
-    headers = [(k.encode('utf-8'), v.encode('utf-8')) for k, v in msg.items()]
 
     # Extract the body for verification
     if msg.is_multipart():
@@ -22,13 +19,23 @@ def verify_dkim_signature(email_content):
     else:
         body = msg.get_payload(decode=True).decode(msg.get_content_charset() or 'utf-8')
 
+    # Compute the body hash
+    body_hash = base64.b64encode(hashlib.sha256(body.encode('utf-8')).digest()).decode()
+
     # Perform DKIM verification
     try:
-        result = dkim.verify(email_content)
-        return result
+        is_valid = dkim.verify(email_content)
+        result = is_valid
     except Exception as e:
         print(f"Verification error: {e}")
-        return False
+        result = False
+
+    # Output the required details
+    print(f"Body Hash (Python): {body_hash}")
+    print(f"Signature (Python): {msg['DKIM-Signature']}")
+    print(f"Public Key (Python): Fetching public key is not included in this example")
+
+    return result
 
 def main():
     # Read the email content from the .eml file
